@@ -364,57 +364,88 @@ function persist(){
 let html5QrCode=null;
 let isPaused=false;
 
+function setupVideoObserver(){
+  // iOS Safari için: html5-qrcode video elementini DOM'a eklediği anda
+  // playsinline attribute'lerini ekle (sonradan eklemek çok geç)
+  const reader=document.getElementById('reader');
+  const observer=new MutationObserver(()=>{
+    const v=reader.querySelector('video');
+    if(v&&!v.dataset.patched){
+      v.setAttribute('playsinline','true');
+      v.setAttribute('webkit-playsinline','true');
+      v.setAttribute('autoplay','true');
+      v.setAttribute('muted','true');
+      v.muted=true;
+      v.playsInline=true;
+      v.dataset.patched='1';
+    }
+  });
+  observer.observe(reader,{childList:true,subtree:true,attributes:true});
+  return observer;
+}
+
 async function pickRearCamera(){
   try{
     const cams=await Html5Qrcode.getCameras();
     if(!cams||!cams.length)return null;
-    // iPad/iOS: arka kamerayı label'dan bul
     const rear=cams.find(c=>/back|rear|environment|arka/i.test(c.label));
     return (rear||cams[cams.length-1]).id;
   }catch(e){return null}
 }
 
-function patchVideoForIOS(){
-  // iOS Safari: video tam ekrana açılmasın
-  const v=document.querySelector('#reader video');
-  if(v){
-    v.setAttribute('playsinline','true');
-    v.setAttribute('webkit-playsinline','true');
-    v.setAttribute('muted','true');
-    v.muted=true;
-  }
-}
-
 async function startScanner(){
   startBtn.disabled=true;
   startBtn.textContent='Açılıyor...';
+
+  // 1. ÖNCE kamera izni al (ayrı istek - iOS Safari daha güvenilir)
+  let permStream;
+  try{
+    permStream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{ideal:'environment'}},
+      audio:false
+    });
+    // Tracks'i hemen kapat - asıl scanner kendi stream'ini açacak
+    permStream.getTracks().forEach(t=>t.stop());
+  }catch(err){
+    startBtn.disabled=false;
+    startBtn.textContent='Kamerayı Aç →';
+    let msg='Kamera açılamadı.';
+    if(err.name==='NotAllowedError')msg='Kamera izni reddedildi.\n\niPad: Ayarlar > Safari > Kamera > "İzin Ver" seç. Sonra sayfayı yenile.';
+    else if(err.name==='NotFoundError')msg='Kamera bulunamadı.';
+    else if(err.name==='NotReadableError')msg='Kamera başka bir uygulama tarafından kullanılıyor. Diğer uygulamaları kapat.';
+    else if(err.name==='SecurityError')msg='Güvenlik hatası: Site HTTPS üzerinden açılmalı.';
+    else if(err.message)msg='Kamera hatası: '+err.message;
+    if(location.protocol!=='https:'&&location.hostname!=='localhost')msg+='\n\n⚠ HTTPS gerekli (şu an: '+location.protocol+')';
+    alert(msg);
+    return;
+  }
+
+  // 2. Start screen'i KAPAT - reader div görünür olmalı (gizli div'de video init olmaz)
+  startScreen.style.display='none';
+
+  // 3. Observer'ı başlat - video DOM'a eklendiği anda iOS attribute'leri eklenecek
+  setupVideoObserver();
+
+  // 4. Scanner'ı başlat
   html5QrCode=new Html5Qrcode('reader',{verbose:false});
   const config={
     fps:10,
     qrbox:(w,h)=>{const m=Math.min(w,h);return {width:Math.floor(m*0.7),height:Math.floor(m*0.7)}},
-    aspectRatio:1.0,
-    videoConstraints:{facingMode:{ideal:'environment'}}
+    aspectRatio:1.0
   };
   try{
     const camId=await pickRearCamera();
     const source=camId?camId:{facingMode:{ideal:'environment'}};
     await html5QrCode.start(source,config,onScanSuccess,()=>{});
-    setTimeout(patchVideoForIOS,100);
-    setTimeout(patchVideoForIOS,500);
-    startScreen.style.display='none';
     scanOverlay.style.display='flex';
     statusDot.classList.add('active');
     statusText.textContent='Aktif';
   }catch(err){
-    console.error(err);
+    console.error('Scanner start failed:',err);
+    startScreen.style.display='flex';
     startBtn.disabled=false;
     startBtn.textContent='Kamerayı Aç →';
-    let msg='Kamera açılamadı.';
-    if(err&&err.name==='NotAllowedError')msg='Kamera izni reddedildi. Ayarlar > Safari > Kamera bölümünden izin verin.';
-    else if(err&&err.name==='NotFoundError')msg='Kamera bulunamadı.';
-    else if(err&&err.message)msg='Kamera açılamadı: '+err.message;
-    if(location.protocol!=='https:'&&location.hostname!=='localhost')msg+='\n\nUYARI: HTTPS gerekli.';
-    alert(msg);
+    alert('Tarayıcı başlatılamadı: '+(err.message||err));
   }
 }
 

@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,800;1,9..144,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/[email protected]/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <style>
 :root{
   --bg:#f4efe6;
@@ -360,93 +360,110 @@ function persist(){
   }));
 }
 
-// SCANNING
-let html5QrCode=null;
-let isPaused=false;
-
-function setupVideoObserver(){
-  // iOS Safari için: html5-qrcode video elementini DOM'a eklediği anda
-  // playsinline attribute'lerini ekle (sonradan eklemek çok geç)
-  const reader=document.getElementById('reader');
-  const observer=new MutationObserver(()=>{
-    const v=reader.querySelector('video');
-    if(v&&!v.dataset.patched){
-      v.setAttribute('playsinline','true');
-      v.setAttribute('webkit-playsinline','true');
-      v.setAttribute('autoplay','true');
-      v.setAttribute('muted','true');
-      v.muted=true;
-      v.playsInline=true;
-      v.dataset.patched='1';
-    }
-  });
-  observer.observe(reader,{childList:true,subtree:true,attributes:true});
-  return observer;
-}
-
-async function pickRearCamera(){
-  try{
-    const cams=await Html5Qrcode.getCameras();
-    if(!cams||!cams.length)return null;
-    const rear=cams.find(c=>/back|rear|environment|arka/i.test(c.label));
-    return (rear||cams[cams.length-1]).id;
-  }catch(e){return null}
-}
+// SCANNING — manual video + jsQR (iOS Safari uyumlu)
+let videoEl=null,canvasEl=null,canvasCtx=null,mediaStream=null;
+let isPaused=false,scanRAF=null;
 
 async function startScanner(){
   startBtn.disabled=true;
   startBtn.textContent='Açılıyor...';
 
-  // 1. ÖNCE kamera izni al (ayrı istek - iOS Safari daha güvenilir)
-  let permStream;
+  // 1. Start screen'i kapat — reader görünür olmalı
+  startScreen.style.display='none';
+
+  // 2. Reader div'ini temizle ve video oluştur
+  const reader=document.getElementById('reader');
+  reader.innerHTML='';
+
+  videoEl=document.createElement('video');
+  videoEl.setAttribute('playsinline','true');
+  videoEl.setAttribute('webkit-playsinline','true');
+  videoEl.setAttribute('autoplay','true');
+  videoEl.setAttribute('muted','true');
+  videoEl.muted=true;
+  videoEl.playsInline=true;
+  videoEl.style.cssText='width:100%;height:100%;object-fit:cover;display:block;background:#000';
+  reader.appendChild(videoEl);
+
+  canvasEl=document.createElement('canvas');
+  canvasCtx=canvasEl.getContext('2d',{willReadFrequently:true});
+
+  // 3. Kamerayı aç
   try{
-    permStream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:{ideal:'environment'}},
+    mediaStream=await navigator.mediaDevices.getUserMedia({
+      video:{
+        facingMode:{ideal:'environment'},
+        width:{ideal:1280},
+        height:{ideal:720}
+      },
       audio:false
     });
-    // Tracks'i hemen kapat - asıl scanner kendi stream'ini açacak
-    permStream.getTracks().forEach(t=>t.stop());
   }catch(err){
-    startBtn.disabled=false;
-    startBtn.textContent='Kamerayı Aç →';
-    let msg='Kamera açılamadı.';
-    if(err.name==='NotAllowedError')msg='Kamera izni reddedildi.\n\niPad: Ayarlar > Safari > Kamera > "İzin Ver" seç. Sonra sayfayı yenile.';
-    else if(err.name==='NotFoundError')msg='Kamera bulunamadı.';
-    else if(err.name==='NotReadableError')msg='Kamera başka bir uygulama tarafından kullanılıyor. Diğer uygulamaları kapat.';
-    else if(err.name==='SecurityError')msg='Güvenlik hatası: Site HTTPS üzerinden açılmalı.';
-    else if(err.message)msg='Kamera hatası: '+err.message;
-    if(location.protocol!=='https:'&&location.hostname!=='localhost')msg+='\n\n⚠ HTTPS gerekli (şu an: '+location.protocol+')';
-    alert(msg);
+    failStart(err);
     return;
   }
 
-  // 2. Start screen'i KAPAT - reader div görünür olmalı (gizli div'de video init olmaz)
-  startScreen.style.display='none';
+  videoEl.srcObject=mediaStream;
 
-  // 3. Observer'ı başlat - video DOM'a eklendiği anda iOS attribute'leri eklenecek
-  setupVideoObserver();
-
-  // 4. Scanner'ı başlat
-  html5QrCode=new Html5Qrcode('reader',{verbose:false});
-  const config={
-    fps:10,
-    qrbox:(w,h)=>{const m=Math.min(w,h);return {width:Math.floor(m*0.7),height:Math.floor(m*0.7)}},
-    aspectRatio:1.0
+  // 4. Video metadata yüklendiğinde play() çağır (iOS için kritik)
+  videoEl.onloadedmetadata=async()=>{
+    try{
+      await videoEl.play();
+      scanOverlay.style.display='flex';
+      statusDot.classList.add('active');
+      statusText.textContent='Aktif';
+      startScanLoop();
+    }catch(playErr){
+      console.error('play failed',playErr);
+      alert('Video başlatılamadı: '+playErr.message);
+      failStart(playErr);
+    }
   };
-  try{
-    const camId=await pickRearCamera();
-    const source=camId?camId:{facingMode:{ideal:'environment'}};
-    await html5QrCode.start(source,config,onScanSuccess,()=>{});
-    scanOverlay.style.display='flex';
-    statusDot.classList.add('active');
-    statusText.textContent='Aktif';
-  }catch(err){
-    console.error('Scanner start failed:',err);
-    startScreen.style.display='flex';
-    startBtn.disabled=false;
-    startBtn.textContent='Kamerayı Aç →';
-    alert('Tarayıcı başlatılamadı: '+(err.message||err));
-  }
+}
+
+function failStart(err){
+  console.error(err);
+  if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null}
+  startScreen.style.display='flex';
+  startBtn.disabled=false;
+  startBtn.textContent='Kamerayı Aç →';
+  let msg='Kamera açılamadı.';
+  if(err.name==='NotAllowedError')msg='Kamera izni reddedildi.\n\niPad: Ayarlar > Safari > Kamera > "İzin Ver". Sonra sayfayı yenile.';
+  else if(err.name==='NotFoundError')msg='Kamera bulunamadı.';
+  else if(err.name==='NotReadableError')msg='Kamera başka uygulama tarafından kullanılıyor.';
+  else if(err.name==='SecurityError')msg='Güvenlik hatası: Site HTTPS olmalı.';
+  else if(err.message)msg='Hata: '+err.message;
+  if(location.protocol!=='https:'&&location.hostname!=='localhost')msg+='\n\n⚠ HTTPS gerekli';
+  alert(msg);
+}
+
+function startScanLoop(){
+  const tick=()=>{
+    if(!videoEl||videoEl.readyState!==videoEl.HAVE_ENOUGH_DATA){
+      scanRAF=requestAnimationFrame(tick);
+      return;
+    }
+    if(isPaused){
+      scanRAF=requestAnimationFrame(tick);
+      return;
+    }
+    canvasEl.width=videoEl.videoWidth;
+    canvasEl.height=videoEl.videoHeight;
+    canvasCtx.drawImage(videoEl,0,0,canvasEl.width,canvasEl.height);
+    const img=canvasCtx.getImageData(0,0,canvasEl.width,canvasEl.height);
+    const code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+    if(code&&code.data){
+      onScanSuccess(code.data);
+    }
+    scanRAF=requestAnimationFrame(tick);
+  };
+  scanRAF=requestAnimationFrame(tick);
+}
+
+function stopScanner(){
+  if(scanRAF){cancelAnimationFrame(scanRAF);scanRAF=null}
+  if(mediaStream){mediaStream.getTracks().forEach(t=>t.stop());mediaStream=null}
+  if(videoEl){videoEl.srcObject=null;videoEl=null}
 }
 
 function onScanSuccess(decodedText){
@@ -532,15 +549,13 @@ function beep(){
 startBtn.addEventListener('click',startScanner);
 
 pauseBtn.addEventListener('click',()=>{
-  if(!html5QrCode)return;
+  if(!videoEl)return;
   isPaused=!isPaused;
   if(isPaused){
-    html5QrCode.pause(true);
     pauseBtn.innerHTML='▶ Devam Et';
     statusDot.classList.remove('active');
     statusText.textContent='Duraklatıldı';
   }else{
-    html5QrCode.resume();
     pauseBtn.innerHTML='⏸ Duraklat';
     statusDot.classList.add('active');
     statusText.textContent='Aktif';

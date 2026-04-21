@@ -166,8 +166,41 @@ header{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;justif
 .warn.show{opacity:1}
 .warn.success{background:var(--success)}
 
+/* TABLET (iPad 8 portrait: 810x1080) */
 @media (min-width:768px){
-  .app{max-width:520px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+  header{padding:28px 40px}
+  .brand{font-size:36px}
+  .session{font-size:12px}
+  .counter-bar{padding:36px 40px;gap:32px}
+  .counter .label{font-size:12px;margin-bottom:12px}
+  .counter .num{font-size:88px}
+  .counter .sub{font-size:13px;margin-top:8px}
+  .scanner-area{padding:32px 40px}
+  .scanner-label{font-size:12px;margin-bottom:18px}
+  .scan-box{max-width:420px}
+  .scan-box .corner{width:56px;height:56px;border-width:4px}
+  .scan-hint{font-size:13px;bottom:30px}
+  .start-screen .icon{font-size:64px}
+  .start-screen h2{font-size:42px}
+  .start-screen p{font-size:16px;max-width:360px;margin-bottom:40px}
+  .start-btn{padding:22px 56px;font-size:22px}
+  .controls{padding:20px 40px;gap:16px}
+  .ctrl-btn{padding:18px;font-size:13px}
+}
+
+/* TABLET LANDSCAPE (iPad 8 landscape: 1080x810) */
+@media (min-width:900px) and (orientation:landscape){
+  .app{display:grid;grid-template-columns:1fr 1.4fr;grid-template-rows:auto 1fr auto;height:100vh}
+  header{grid-column:1/-1}
+  .counter-bar{grid-column:1;grid-row:2;border-bottom:none;border-right:1px solid var(--line);align-content:center;grid-template-columns:1fr;gap:48px}
+  .counter .num{font-size:104px}
+  .scanner-area{grid-column:2;grid-row:2}
+  .controls{grid-column:1/-1}
+}
+
+/* DESKTOP CAP */
+@media (min-width:1280px){
+  .app{max-width:1280px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line)}
 }
 </style>
 </head>
@@ -331,26 +364,57 @@ function persist(){
 let html5QrCode=null;
 let isPaused=false;
 
-async function startScanner(){
-  html5QrCode=new Html5Qrcode('reader',{verbose:false});
+async function pickRearCamera(){
   try{
-    await html5QrCode.start(
-      {facingMode:'environment'},
-      {
-        fps:10,
-        qrbox:(w,h)=>{const m=Math.min(w,h);return {width:Math.floor(m*0.7),height:Math.floor(m*0.7)}},
-        aspectRatio:1.0
-      },
-      onScanSuccess,
-      ()=>{} // errors ignored
-    );
+    const cams=await Html5Qrcode.getCameras();
+    if(!cams||!cams.length)return null;
+    // iPad/iOS: arka kamerayı label'dan bul
+    const rear=cams.find(c=>/back|rear|environment|arka/i.test(c.label));
+    return (rear||cams[cams.length-1]).id;
+  }catch(e){return null}
+}
+
+function patchVideoForIOS(){
+  // iOS Safari: video tam ekrana açılmasın
+  const v=document.querySelector('#reader video');
+  if(v){
+    v.setAttribute('playsinline','true');
+    v.setAttribute('webkit-playsinline','true');
+    v.setAttribute('muted','true');
+    v.muted=true;
+  }
+}
+
+async function startScanner(){
+  startBtn.disabled=true;
+  startBtn.textContent='Açılıyor...';
+  html5QrCode=new Html5Qrcode('reader',{verbose:false});
+  const config={
+    fps:10,
+    qrbox:(w,h)=>{const m=Math.min(w,h);return {width:Math.floor(m*0.7),height:Math.floor(m*0.7)}},
+    aspectRatio:1.0,
+    videoConstraints:{facingMode:{ideal:'environment'}}
+  };
+  try{
+    const camId=await pickRearCamera();
+    const source=camId?camId:{facingMode:{ideal:'environment'}};
+    await html5QrCode.start(source,config,onScanSuccess,()=>{});
+    setTimeout(patchVideoForIOS,100);
+    setTimeout(patchVideoForIOS,500);
     startScreen.style.display='none';
     scanOverlay.style.display='flex';
     statusDot.classList.add('active');
     statusText.textContent='Aktif';
   }catch(err){
     console.error(err);
-    alert('Kamera açılamadı: '+err.message+'\n\nLütfen kamera izni verin ve HTTPS üzerinden erişin.');
+    startBtn.disabled=false;
+    startBtn.textContent='Kamerayı Aç →';
+    let msg='Kamera açılamadı.';
+    if(err&&err.name==='NotAllowedError')msg='Kamera izni reddedildi. Ayarlar > Safari > Kamera bölümünden izin verin.';
+    else if(err&&err.name==='NotFoundError')msg='Kamera bulunamadı.';
+    else if(err&&err.message)msg='Kamera açılamadı: '+err.message;
+    if(location.protocol!=='https:'&&location.hostname!=='localhost')msg+='\n\nUYARI: HTTPS gerekli.';
+    alert(msg);
   }
 }
 

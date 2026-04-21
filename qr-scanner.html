@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#f4efe6">
+<title>QR Giriş Sistemi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,800;1,9..144,600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/[email protected]/html5-qrcode.min.js"></script>
+<style>
+:root{
+  --bg:#f4efe6;
+  --ink:#14120f;
+  --muted:#7a7368;
+  --accent:#ff5722;
+  --success:#2d8659;
+  --paper:#fbf8f1;
+  --line:#14120f;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--ink);font-family:'JetBrains Mono',monospace;min-height:100vh;overflow:hidden;height:100vh;width:100vw}
+body{
+  background-image:
+    radial-gradient(circle at 15% 20%, rgba(255,87,34,.06), transparent 45%),
+    radial-gradient(circle at 85% 80%, rgba(20,18,15,.04), transparent 50%);
+}
+.noise{position:fixed;inset:0;pointer-events:none;opacity:.03;z-index:1;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+.app{position:relative;z-index:2;height:100vh;display:flex;flex-direction:column}
+
+/* HEADER */
+header{padding:20px 24px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.brand{font-family:'Fraunces',serif;font-weight:800;font-size:28px;line-height:1;letter-spacing:-.03em}
+.brand em{font-style:italic;font-weight:600;color:var(--accent)}
+.session{font-size:10px;letter-spacing:.25em;text-transform:uppercase;color:var(--muted);text-align:right;line-height:1.6}
+.session b{color:var(--ink);font-weight:700}
+
+/* COUNTER */
+.counter-bar{padding:28px 24px;display:grid;grid-template-columns:1fr 1fr;gap:20px;border-bottom:1px solid var(--line);flex-shrink:0}
+.counter{text-align:center}
+.counter .label{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.counter .num{font-family:'Fraunces',serif;font-weight:800;font-size:64px;line-height:.9;letter-spacing:-.04em}
+.counter .num em{font-style:italic;color:var(--accent);font-weight:600}
+.counter .sub{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.1em}
+
+/* SCANNER */
+.scanner-area{flex:1;display:flex;flex-direction:column;padding:20px;min-height:0}
+.scanner-label{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+.scanner-label .status{display:flex;align-items:center;gap:8px}
+.scanner-label .dot{width:8px;height:8px;background:var(--accent);border-radius:50%;animation:pulse 1.5s infinite}
+.scanner-label .dot.active{background:var(--success)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.3)}}
+
+.scanner-frame{
+  flex:1;position:relative;background:#000;border:1.5px solid var(--line);
+  overflow:hidden;min-height:0;
+  box-shadow:6px 6px 0 var(--ink);
+}
+#reader{width:100%!important;height:100%!important;border:none!important}
+#reader video{width:100%!important;height:100%!important;object-fit:cover!important}
+#reader__scan_region{background:transparent!important}
+#reader__scan_region img{display:none!important}
+#reader__dashboard{display:none!important}
+
+/* Scanner overlay */
+.scan-overlay{position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center}
+.scan-box{width:70%;max-width:300px;aspect-ratio:1;position:relative}
+.scan-box .corner{position:absolute;width:40px;height:40px;border:3px solid #fff}
+.scan-box .corner.tl{top:0;left:0;border-right:none;border-bottom:none}
+.scan-box .corner.tr{top:0;right:0;border-left:none;border-bottom:none}
+.scan-box .corner.bl{bottom:0;left:0;border-right:none;border-top:none}
+.scan-box .corner.br{bottom:0;right:0;border-left:none;border-top:none}
+.scan-line{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--accent),transparent);animation:scanMove 2s ease-in-out infinite}
+@keyframes scanMove{0%,100%{top:5%}50%{top:95%}}
+
+.scan-hint{position:absolute;bottom:20px;left:0;right:0;text-align:center;color:#fff;font-size:11px;letter-spacing:.2em;text-transform:uppercase;text-shadow:0 1px 3px rgba(0,0,0,.8)}
+
+/* Start screen */
+.start-screen{position:absolute;inset:0;background:var(--paper);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;text-align:center;z-index:10}
+.start-screen .icon{font-size:48px;margin-bottom:20px}
+.start-screen h2{font-family:'Fraunces',serif;font-size:32px;font-weight:800;letter-spacing:-.03em;margin-bottom:10px;line-height:1}
+.start-screen p{font-size:13px;color:var(--muted);margin-bottom:32px;max-width:280px;line-height:1.5}
+.start-btn{padding:18px 40px;background:var(--ink);color:var(--paper);border:none;font-family:'Fraunces',serif;font-weight:600;font-size:18px;letter-spacing:-.01em;cursor:pointer;transition:all .2s}
+.start-btn:hover{background:var(--accent)}
+
+/* WELCOME OVERLAY */
+.welcome{
+  position:fixed;inset:0;background:var(--bg);z-index:100;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:40px;text-align:center;
+  opacity:0;pointer-events:none;transition:opacity .3s ease;
+}
+.welcome.show{opacity:1;pointer-events:auto;animation:welcomeIn .5s ease-out}
+@keyframes welcomeIn{
+  0%{opacity:0;transform:scale(.95)}
+  100%{opacity:1;transform:scale(1)}
+}
+.welcome-badge{
+  font-size:11px;letter-spacing:.4em;text-transform:uppercase;color:var(--muted);
+  margin-bottom:24px;
+}
+.welcome-badge::before{content:"◆ ";color:var(--accent)}
+
+.welcome-title{
+  font-family:'Fraunces',serif;font-weight:800;font-size:clamp(72px,18vw,140px);
+  line-height:.85;letter-spacing:-.05em;margin-bottom:12px;
+}
+.welcome-title em{font-style:italic;font-weight:600;color:var(--accent);display:block}
+
+.welcome-sub{
+  font-size:16px;color:var(--muted);margin-bottom:40px;max-width:400px;line-height:1.5;
+}
+
+.welcome-num{
+  display:flex;align-items:baseline;gap:16px;justify-content:center;
+  padding:20px 32px;border:1.5px solid var(--line);background:var(--paper);
+  box-shadow:4px 4px 0 var(--ink);
+}
+.welcome-num .lbl{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--muted)}
+.welcome-num .val{font-family:'Fraunces',serif;font-weight:800;font-size:48px;line-height:1;letter-spacing:-.03em}
+.welcome-num .val em{color:var(--accent);font-style:italic}
+
+.welcome-url{
+  position:absolute;bottom:30px;left:30px;right:30px;
+  font-size:10px;color:var(--muted);letter-spacing:.1em;word-break:break-all;
+  padding:12px;border-top:1px solid var(--line);
+}
+.welcome-url b{color:var(--ink);font-weight:700;letter-spacing:.25em;text-transform:uppercase;margin-right:8px}
+
+.welcome-timer{
+  position:absolute;top:30px;right:30px;
+  width:48px;height:48px;border:1.5px solid var(--line);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-family:'Fraunces',serif;font-weight:600;font-size:20px;
+}
+.welcome-timer-ring{position:absolute;inset:-2px;border-radius:50%;transform:rotate(-90deg)}
+.welcome-timer-ring circle{fill:none;stroke:var(--accent);stroke-width:3;stroke-dasharray:157;stroke-dashoffset:157;animation:timerCountdown 2.5s linear forwards}
+@keyframes timerCountdown{to{stroke-dashoffset:0}}
+
+/* CONTROLS */
+.controls{padding:16px 24px;border-top:1px solid var(--line);display:flex;gap:12px;flex-shrink:0;background:var(--bg)}
+.ctrl-btn{flex:1;padding:14px;background:transparent;border:1.5px solid var(--line);color:var(--ink);font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;cursor:pointer;transition:all .2s;font-weight:500}
+.ctrl-btn:hover,.ctrl-btn:active{background:var(--ink);color:var(--paper)}
+.ctrl-btn.danger:hover,.ctrl-btn.danger:active{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* Confirm modal */
+.modal-bg{position:fixed;inset:0;background:rgba(20,18,15,.6);z-index:200;display:none;align-items:center;justify-content:center;padding:24px}
+.modal-bg.show{display:flex}
+.modal{background:var(--paper);border:1.5px solid var(--line);padding:32px;max-width:340px;width:100%;box-shadow:8px 8px 0 var(--ink)}
+.modal h3{font-family:'Fraunces',serif;font-weight:800;font-size:24px;margin-bottom:12px;letter-spacing:-.02em}
+.modal p{font-size:13px;color:var(--muted);margin-bottom:24px;line-height:1.5}
+.modal-actions{display:flex;gap:10px}
+.modal-actions button{flex:1;padding:14px;border:1.5px solid var(--line);background:transparent;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.2em;text-transform:uppercase;cursor:pointer;font-weight:500}
+.modal-actions .confirm{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* Duplicate warning */
+.warn{
+  position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:150;
+  background:var(--ink);color:var(--paper);padding:14px 20px;
+  font-size:12px;letter-spacing:.1em;
+  opacity:0;transition:opacity .3s;pointer-events:none;
+}
+.warn.show{opacity:1}
+.warn.success{background:var(--success)}
+
+@media (min-width:768px){
+  .app{max-width:520px;margin:0 auto;border-left:1px solid var(--line);border-right:1px solid var(--line)}
+}
+</style>
+</head>
+<body>
+<div class="noise"></div>
+
+<div class="app">
+  <header>
+    <div class="brand">Giriş<em>Sistemi</em></div>
+    <div class="session">
+      <div>Oturum · <b id="sessionId">—</b></div>
+      <div id="sessionDate">—</div>
+    </div>
+  </header>
+
+  <div class="counter-bar">
+    <div class="counter">
+      <div class="label">Toplam Giriş</div>
+      <div class="num"><em id="totalCount">0</em></div>
+      <div class="sub">kişi kayıt oldu</div>
+    </div>
+    <div class="counter">
+      <div class="label">Benzersiz QR</div>
+      <div class="num" id="uniqueCount">0</div>
+      <div class="sub">farklı kod okundu</div>
+    </div>
+  </div>
+
+  <div class="scanner-area">
+    <div class="scanner-label">
+      <span>QR TARAYICI</span>
+      <span class="status"><span class="dot" id="statusDot"></span><span id="statusText">Beklemede</span></span>
+    </div>
+    <div class="scanner-frame">
+      <div id="reader"></div>
+      <div class="scan-overlay" id="scanOverlay" style="display:none">
+        <div class="scan-box">
+          <div class="corner tl"></div>
+          <div class="corner tr"></div>
+          <div class="corner bl"></div>
+          <div class="corner br"></div>
+          <div class="scan-line"></div>
+        </div>
+        <div class="scan-hint">QR kodu çerçeve içine hizalayın</div>
+      </div>
+      <div class="start-screen" id="startScreen">
+        <div class="icon">◈</div>
+        <h2>Taramayı Başlat</h2>
+        <p>Kamera erişimi gereklidir. QR kodları otomatik olarak algılanacaktır.</p>
+        <button class="start-btn" id="startBtn">Kamerayı Aç →</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="ctrl-btn" id="pauseBtn">⏸ Duraklat</button>
+    <button class="ctrl-btn danger" id="resetBtn">↻ Sıfırla</button>
+  </div>
+</div>
+
+<!-- WELCOME OVERLAY -->
+<div class="welcome" id="welcome">
+  <div class="welcome-timer">
+    <svg class="welcome-timer-ring" viewBox="0 0 56 56"><circle cx="28" cy="28" r="25"/></svg>
+    <span id="welcomeTimer">3</span>
+  </div>
+  <div class="welcome-badge">Giriş Onaylandı</div>
+  <div class="welcome-title">Hoş<em>Geldiniz</em></div>
+  <div class="welcome-sub">Kaydınız başarıyla alındı. Bir sonraki kişi için hazırız.</div>
+  <div class="welcome-num">
+    <div>
+      <div class="lbl">Sıra No</div>
+      <div class="val">#<em id="welcomeOrder">001</em></div>
+    </div>
+    <div style="width:1px;height:40px;background:var(--line)"></div>
+    <div>
+      <div class="lbl">Toplam</div>
+      <div class="val" id="welcomeTotal">1</div>
+    </div>
+  </div>
+  <div class="welcome-url"><b>Kod:</b><span id="welcomeCode">—</span></div>
+</div>
+
+<!-- DUPLICATE WARNING -->
+<div class="warn" id="warn"></div>
+
+<!-- RESET CONFIRM -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h3>Sayacı sıfırla?</h3>
+    <p>Tüm giriş kayıtları silinecek. Bu işlem geri alınamaz.</p>
+    <div class="modal-actions">
+      <button id="cancelReset">İptal</button>
+      <button class="confirm" id="confirmReset">Sıfırla</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// STATE
+const STORAGE_KEY='qrscan_session_v1';
+let state={
+  total:0,
+  unique:new Set(),
+  sessionId:null,
+  sessionDate:null,
+  allowDuplicates:true // okunan her QR sayılır, duplicates kısa aralıkta engellenir
+};
+const recentScans=new Map(); // cooldown için
+const COOLDOWN_MS=5000; // 5 saniye
+
+// ELEMENTS
+const $=id=>document.getElementById(id);
+const totalCount=$('totalCount'),uniqueCount=$('uniqueCount');
+const sessionIdEl=$('sessionId'),sessionDateEl=$('sessionDate');
+const statusDot=$('statusDot'),statusText=$('statusText');
+const startScreen=$('startScreen'),startBtn=$('startBtn');
+const scanOverlay=$('scanOverlay');
+const pauseBtn=$('pauseBtn'),resetBtn=$('resetBtn');
+const welcome=$('welcome'),welcomeOrder=$('welcomeOrder'),welcomeTotal=$('welcomeTotal'),welcomeCode=$('welcomeCode'),welcomeTimer=$('welcomeTimer');
+const warn=$('warn');
+const modalBg=$('modalBg'),cancelReset=$('cancelReset'),confirmReset=$('confirmReset');
+
+// SESSION SETUP
+function initSession(){
+  const saved=localStorage.getItem(STORAGE_KEY);
+  if(saved){
+    try{
+      const d=JSON.parse(saved);
+      state.total=d.total||0;
+      state.unique=new Set(d.unique||[]);
+      state.sessionId=d.sessionId;
+      state.sessionDate=d.sessionDate;
+    }catch(e){}
+  }
+  if(!state.sessionId){
+    state.sessionId=Math.random().toString(36).substring(2,6).toUpperCase();
+    state.sessionDate=new Date().toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+  }
+  updateUI();
+  persist();
+}
+
+function updateUI(){
+  totalCount.textContent=String(state.total).padStart(3,'0');
+  uniqueCount.textContent=String(state.unique.size).padStart(3,'0');
+  sessionIdEl.textContent=state.sessionId;
+  sessionDateEl.textContent=state.sessionDate;
+}
+
+function persist(){
+  localStorage.setItem(STORAGE_KEY,JSON.stringify({
+    total:state.total,
+    unique:[...state.unique],
+    sessionId:state.sessionId,
+    sessionDate:state.sessionDate
+  }));
+}
+
+// SCANNING
+let html5QrCode=null;
+let isPaused=false;
+
+async function startScanner(){
+  html5QrCode=new Html5Qrcode('reader',{verbose:false});
+  try{
+    await html5QrCode.start(
+      {facingMode:'environment'},
+      {
+        fps:10,
+        qrbox:(w,h)=>{const m=Math.min(w,h);return {width:Math.floor(m*0.7),height:Math.floor(m*0.7)}},
+        aspectRatio:1.0
+      },
+      onScanSuccess,
+      ()=>{} // errors ignored
+    );
+    startScreen.style.display='none';
+    scanOverlay.style.display='flex';
+    statusDot.classList.add('active');
+    statusText.textContent='Aktif';
+  }catch(err){
+    console.error(err);
+    alert('Kamera açılamadı: '+err.message+'\n\nLütfen kamera izni verin ve HTTPS üzerinden erişin.');
+  }
+}
+
+function onScanSuccess(decodedText){
+  if(isPaused)return;
+  
+  const now=Date.now();
+  const last=recentScans.get(decodedText);
+  
+  if(last&&(now-last)<COOLDOWN_MS){
+    showWarn(`Bu QR zaten okundu (${Math.ceil((COOLDOWN_MS-(now-last))/1000)}sn bekle)`,false);
+    return;
+  }
+  
+  recentScans.set(decodedText,now);
+  
+  // Clean old cooldown entries
+  for(const [k,v] of recentScans){
+    if(now-v>COOLDOWN_MS*2)recentScans.delete(k);
+  }
+  
+  state.total++;
+  state.unique.add(decodedText);
+  persist();
+  updateUI();
+  
+  showWelcome(decodedText);
+  vibrate();
+  beep();
+}
+
+function showWelcome(code){
+  welcomeOrder.textContent=String(state.total).padStart(3,'0');
+  welcomeTotal.textContent=state.total;
+  welcomeCode.textContent=code.length>60?code.substring(0,60)+'...':code;
+  welcome.classList.add('show');
+  
+  // Timer countdown
+  let t=3;
+  welcomeTimer.textContent=t;
+  const timerEl=welcome.querySelector('.welcome-timer-ring circle');
+  timerEl.style.animation='none';
+  void timerEl.offsetWidth;
+  timerEl.style.animation='timerCountdown 2.5s linear forwards';
+  
+  const countdown=setInterval(()=>{
+    t--;
+    welcomeTimer.textContent=t;
+    if(t<=0){
+      clearInterval(countdown);
+      welcome.classList.remove('show');
+    }
+  },1000);
+}
+
+function showWarn(msg,ok=false){
+  warn.textContent=msg;
+  warn.classList.toggle('success',ok);
+  warn.classList.add('show');
+  setTimeout(()=>warn.classList.remove('show'),2500);
+}
+
+function vibrate(){
+  if(navigator.vibrate)navigator.vibrate([80,40,80]);
+}
+
+function beep(){
+  try{
+    const ctx=new (window.AudioContext||window.webkitAudioContext)();
+    const osc=ctx.createOscillator();
+    const gain=ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.frequency.value=880;
+    osc.type='sine';
+    gain.gain.setValueAtTime(0,ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(.15,ctx.currentTime+.01);
+    gain.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.2);
+    osc.start();
+    osc.stop(ctx.currentTime+.2);
+  }catch(e){}
+}
+
+// CONTROLS
+startBtn.addEventListener('click',startScanner);
+
+pauseBtn.addEventListener('click',()=>{
+  if(!html5QrCode)return;
+  isPaused=!isPaused;
+  if(isPaused){
+    html5QrCode.pause(true);
+    pauseBtn.innerHTML='▶ Devam Et';
+    statusDot.classList.remove('active');
+    statusText.textContent='Duraklatıldı';
+  }else{
+    html5QrCode.resume();
+    pauseBtn.innerHTML='⏸ Duraklat';
+    statusDot.classList.add('active');
+    statusText.textContent='Aktif';
+  }
+});
+
+resetBtn.addEventListener('click',()=>{
+  modalBg.classList.add('show');
+});
+cancelReset.addEventListener('click',()=>modalBg.classList.remove('show'));
+confirmReset.addEventListener('click',()=>{
+  state.total=0;
+  state.unique.clear();
+  state.sessionId=Math.random().toString(36).substring(2,6).toUpperCase();
+  state.sessionDate=new Date().toLocaleDateString('tr-TR',{day:'2-digit',month:'short',year:'numeric'});
+  recentScans.clear();
+  persist();
+  updateUI();
+  modalBg.classList.remove('show');
+  showWarn('Oturum sıfırlandı',true);
+});
+
+// Tap welcome to dismiss
+welcome.addEventListener('click',()=>welcome.classList.remove('show'));
+
+// INIT
+initSession();
+</script>
+</body>
+</html>
